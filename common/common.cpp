@@ -2001,6 +2001,9 @@ static common_control_vector_data common_control_vector_load_one(const common_co
     // would misjudge a direction that happens to be zero in the probed positions.
     std::set<int> seen_layers;
 
+    // Every layer index seen, in both modes, for the cross-check after the loop.
+    std::set<int> all_layers;
+
     for (int i = 0; i < n_tensors; i++) {
         std::string name = gguf_get_tensor_name(ctx_gguf, i);
 
@@ -2045,6 +2048,8 @@ static common_control_vector_data common_control_vector_load_one(const common_co
             break;
         }
 
+        all_layers.insert(layer_idx);
+
         // extend if necessary - do not store data for layer 0 (it's not used)
         result.data.resize(std::max(result.data.size(), static_cast<size_t>(result.n_embd * layer_idx)), 0.0f);
 
@@ -2071,6 +2076,41 @@ static common_control_vector_data common_control_vector_load_one(const common_co
             }
         }
 
+    }
+
+    // Cross-check the tensor names against dspark.layer_ids_zero_based. Both are
+    // written from the same source, so a disagreement means a broken exporter --
+    // which happened once: an exporter emitted direction.11..39 for directions
+    // derived at layers 10..38 while this field still read 10..38. The names are
+    // what get applied, so the whole stack shifted one layer, and a one-layer
+    // shift degrades rather than fails (adjacent-layer refusal directions have
+    // cosine similarity 0.83-0.91). The file carried the evidence of its own bug
+    // and nothing looked at it.
+    if (result.n_embd != -1) {
+        const int lid = gguf_find_key(ctx_gguf, "dspark.layer_ids_zero_based");
+        if (lid >= 0 && gguf_get_kv_type(ctx_gguf, lid) == GGUF_TYPE_STRING) {
+            std::set<int> declared;
+            bool parsed = true;
+            for (const auto & tok : string_split<std::string>(gguf_get_val_str(ctx_gguf, lid), ',')) {
+                try {
+                    declared.insert(std::stoi(tok));
+                } catch (...) {
+                    parsed = false;
+                    break;
+                }
+            }
+            if (parsed && !declared.empty() && declared != all_layers) {
+                COM_ERR("%s: dspark.layer_ids_zero_based declares %zu layers (%d..%d) but the "
+                        "direction tensors resolve to %zu (%d..%d). The tensor names are what "
+                        "get applied, so this file would steer the wrong layers.\n",
+                        load_info.fname.c_str(),
+                        declared.size(), *declared.begin(), *declared.rbegin(),
+                        all_layers.size(),
+                        all_layers.empty() ? -1 : *all_layers.begin(),
+                        all_layers.empty() ? -1 : *all_layers.rbegin());
+                result.n_embd = -1;
+            }
+        }
     }
 
     if (result.n_embd == -1) {

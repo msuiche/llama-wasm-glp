@@ -174,6 +174,15 @@ int main(int argc, char ** argv) {
     expect(load("cv-badhook.gguf").n_embd == -1, "mismatched dspark.hook_point is refused");
     expect(load("cv-duplayer.gguf").n_embd == -1, "two directions for one layer are refused");
 
+    // A file whose tensor names disagree with dspark.layer_ids_zero_based was
+    // produced by a broken exporter. The names are what get applied, so it would
+    // steer the wrong layers -- silently, since a one-layer shift degrades rather
+    // than fails. Refuse it, and do not false-positive on the correct file.
+    expect(load("cv-shifted.gguf").n_embd == -1,
+           "tensor names disagreeing with declared layer ids are refused");
+    expect(load("cv-consistent.gguf").n_embd == n_embd,
+           "agreeing layer ids load fine");
+
     {   // two projective vectors do not sum into a projection axis
         std::vector<common_control_vector_load_info> in;
         in.push_back({1.0f, dir + "/cv-project.gguf"});

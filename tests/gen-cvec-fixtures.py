@@ -92,3 +92,62 @@ def write_single(name, slot):
 
 
 write_single("cv-single3.gguf", 3)
+
+
+def write_shifted(name, offset=1):
+    """Tensor names disagreeing with dspark.layer_ids_zero_based.
+
+    Reproduces a real exporter bug: directions derived at layers 1..3 written as
+    direction.2..4 while the metadata still declared 1,2,3. The names are what get
+    applied, so the whole stack lands one layer late -- which does not fail, it
+    degrades, because adjacent layers' directions are highly correlated. Must be
+    refused.
+    """
+    r = np.random.default_rng(5)
+    layers = [1, 2, 3]
+    w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
+    w.add_string("controlvector.model_hint", "llama")
+    w.add_uint32("controlvector.layer_count", len(layers))
+    w.add_string("dspark.mode", "project")
+    w.add_uint32("dspark.spec_version", 1)
+    w.add_float32("dspark.alpha_default", 1.0)
+    w.add_string("dspark.hook_point", "residual_stream_post_layer")
+    w.add_string("dspark.layer_ids_zero_based", ",".join(str(l) for l in layers))
+    for l in layers:
+        v = r.standard_normal(n_embd).astype(np.float32)
+        v /= np.linalg.norm(v)
+        w.add_tensor(f"direction.{l + offset}", v)   # the bug
+    w.write_header_to_file()
+    w.write_kv_data_to_file()
+    w.write_tensors_to_file()
+    w.close()
+    print(f"  {name}")
+
+
+write_shifted("cv-shifted.gguf")
+
+
+def write_consistent(name):
+    """Same as cv-shifted but correct, so the check is shown not to false-positive."""
+    r = np.random.default_rng(5)
+    layers = [1, 2, 3]
+    w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
+    w.add_string("controlvector.model_hint", "llama")
+    w.add_uint32("controlvector.layer_count", len(layers))
+    w.add_string("dspark.mode", "project")
+    w.add_uint32("dspark.spec_version", 1)
+    w.add_float32("dspark.alpha_default", 1.0)
+    w.add_string("dspark.hook_point", "residual_stream_post_layer")
+    w.add_string("dspark.layer_ids_zero_based", ",".join(str(l) for l in layers))
+    for l in layers:
+        v = r.standard_normal(n_embd).astype(np.float32)
+        v /= np.linalg.norm(v)
+        w.add_tensor(f"direction.{l}", v)
+    w.write_header_to_file()
+    w.write_kv_data_to_file()
+    w.write_tensors_to_file()
+    w.close()
+    print(f"  {name}")
+
+
+write_consistent("cv-consistent.gguf")
