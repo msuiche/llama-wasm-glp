@@ -41,3 +41,54 @@ write("cv-project2.gguf", mode="project", seed=99)
 write("cv-badmode.gguf", mode="sculpt")                    # must be refused
 write("cv-badhook.gguf", mode="project", hook="attn_wo_output")  # must be refused
 write("cv-add.gguf", mode=None)   # legacy additive: no dspark.* keys at all
+
+
+def write_dup_layer(name):
+    """Two directions parsing to the same layer -- must be refused in project mode.
+
+    gguf tensor names are unique, so the collision is expressed as "direction.2"
+    and "direction.02": distinct names, same parsed layer index.
+    """
+    r = np.random.default_rng(11)
+    w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
+    w.add_string("controlvector.model_hint", "llama")
+    w.add_uint32("controlvector.layer_count", 2)
+    w.add_string("dspark.mode", "project")
+    w.add_uint32("dspark.spec_version", 1)
+    w.add_float32("dspark.alpha_default", 1.0)
+    w.add_string("dspark.hook_point", "residual_stream_post_layer")
+    for nm in ("direction.2", "direction.02"):
+        v = r.standard_normal(n_embd).astype(np.float32)
+        v /= np.linalg.norm(v)
+        w.add_tensor(nm, v)
+    w.write_header_to_file()
+    w.write_kv_data_to_file()
+    w.write_tensors_to_file()
+    w.close()
+    print(f"  {name}")
+
+
+write_dup_layer("cv-duplayer.gguf")
+
+
+def write_single(name, slot):
+    """One direction in one slot, for test-cvec-layer-map."""
+    r = np.random.default_rng(slot)
+    w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
+    w.add_string("controlvector.model_hint", "llama")
+    w.add_uint32("controlvector.layer_count", 1)
+    w.add_string("dspark.mode", "project")
+    w.add_uint32("dspark.spec_version", 1)
+    w.add_float32("dspark.alpha_default", 1.0)
+    w.add_string("dspark.hook_point", "residual_stream_post_layer")
+    v = r.standard_normal(n_embd).astype(np.float32)
+    v /= np.linalg.norm(v)
+    w.add_tensor(f"direction.{slot}", v)
+    w.write_header_to_file()
+    w.write_kv_data_to_file()
+    w.write_tensors_to_file()
+    w.close()
+    print(f"  {name}")
+
+
+write_single("cv-single3.gguf", 3)

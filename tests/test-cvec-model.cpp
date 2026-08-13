@@ -167,6 +167,7 @@ int main(int argc, char ** argv) {
     // ---- loader refusals ---------------------------------------------------
     expect(load("cv-badmode.gguf").n_embd == -1, "unknown dspark.mode is refused");
     expect(load("cv-badhook.gguf").n_embd == -1, "mismatched dspark.hook_point is refused");
+    expect(load("cv-duplayer.gguf").n_embd == -1, "two directions for one layer are refused");
 
     {   // two projective vectors do not sum into a projection axis
         std::vector<common_control_vector_load_info> in;

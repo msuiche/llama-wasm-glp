@@ -23,6 +23,7 @@
 #include <iostream>
 #include <iterator>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -1990,6 +1991,11 @@ static common_control_vector_data common_control_vector_load_one(const common_co
         }
     }
 
+    // project mode forbids two directions for the same layer, so track which
+    // layers have been filled. Checking whether the destination is still zero
+    // would misjudge a direction that happens to be zero in the probed positions.
+    std::set<int> seen_layers;
+
     for (int i = 0; i < n_tensors; i++) {
         std::string name = gguf_get_tensor_name(ctx_gguf, i);
 
@@ -2044,7 +2050,7 @@ static common_control_vector_data common_control_vector_load_one(const common_co
             // the ablation scale with the square of strength, and accumulating a
             // second direction into the same layer would silently produce a
             // non-unit vector that is not a projection axis at all.
-            if (dst[0] != 0.0f || dst[result.n_embd - 1] != 0.0f) {
+            if (!seen_layers.insert(layer_idx).second) {
                 COM_ERR("%s: two direction tensors for layer %d in project mode; "
                         "directions do not sum into a projection axis\n",
                         load_info.fname.c_str(), layer_idx);
