@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Write the control vector fixtures used by test-cvec-model.
+
+Usage: gen-cvec-fixtures.py <out-dir> <n_embd> <n_layer>
+
+Directions are unit-norm because projective mode needs them to be: the removal is
+alpha*(h.d)d, which is quadratic in ||d||, so a non-unit direction silently over-
+or under-ablates.
+"""
+import sys
+import numpy as np
+import gguf
+
+out_dir, n_embd, n_layer = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+
+
+def write(name, mode=None, hook="residual_stream_post_layer", alpha=4.0, seed=7):
+    r = np.random.default_rng(seed)
+    w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
+    w.add_string("controlvector.model_hint", "llama")
+    w.add_uint32("controlvector.layer_count", n_layer)
+    if mode is not None:
+        w.add_string("dspark.mode", mode)
+        w.add_uint32("dspark.spec_version", 1)
+        w.add_float32("dspark.alpha_default", alpha)
+        if hook is not None:
+            w.add_string("dspark.hook_point", hook)
+    for il in range(1, n_layer + 1):          # direction.N is 1-based
+        v = r.standard_normal(n_embd).astype(np.float32)
+        v /= np.linalg.norm(v)
+        w.add_tensor(f"direction.{il}", v)
+    w.write_header_to_file()
+    w.write_kv_data_to_file()
+    w.write_tensors_to_file()
+    w.close()
+    print(f"  {name}")
+
+
+write("cv-project.gguf", mode="project")
+write("cv-project2.gguf", mode="project", seed=99)
+write("cv-badmode.gguf", mode="sculpt")                    # must be refused
+write("cv-badhook.gguf", mode="project", hook="attn_wo_output")  # must be refused
+write("cv-add.gguf", mode=None)   # legacy additive: no dspark.* keys at all

@@ -6,6 +6,7 @@
 
 #include <map>
 #include <cassert>
+#include <cmath>
 #include <sstream>
 #include <stdexcept>
 
@@ -21,7 +22,27 @@ ggml_tensor * llama_adapter_cvec::tensor_for(int il) const {
 
 ggml_tensor * llama_adapter_cvec::apply_to(ggml_context * ctx, ggml_tensor * cur, int  il) const {
     ggml_tensor * layer_dir = tensor_for(il);
-    if (layer_dir != nullptr) {
+    if (layer_dir == nullptr) {
+        return cur;
+    }
+
+    if (mode == LLAMA_CVEC_APPLY_PROJECT) {
+        // h <- h - alpha * (h . d) d, per token, with d unit-norm.
+        //
+        // cur is [n_embd, n_tokens]; layer_dir is [n_embd] i.e. ne = {n_embd, 1}.
+        // mul_mat(d, h) contracts over n_embd and yields the per-token
+        // coefficients as [1, n_tokens]. Multiplying the broadcast direction by
+        // those coefficients gives the rank-1 projection, which is subtracted.
+        //
+        // ggml_mul broadcasts b over a when each of b's dims divides a's, so
+        // [1, n_tokens] against [n_embd, n_tokens] repeats the coefficient along
+        // the embedding axis -- exactly the outer product needed. Written with
+        // mul_mat/repeat/mul/scale/sub rather than ggml_out_prod because these
+        // are supported on every backend.
+        ggml_tensor * coef = ggml_mul_mat(ctx, layer_dir, cur);              // [1, n_tokens]
+        ggml_tensor * proj = ggml_mul(ctx, ggml_repeat(ctx, layer_dir, cur), coef);
+        cur = ggml_sub(ctx, cur, ggml_scale(ctx, proj, alpha));
+    } else {
         cur = ggml_add(ctx, cur, layer_dir);
     }
 
@@ -96,6 +117,8 @@ bool llama_adapter_cvec::apply(
         const float * data,
         size_t len,
         int32_t n_embd,
+        llama_cvec_apply_mode mode,
+        float alpha,
         int32_t il_start,
         int32_t il_end) {
     const auto & hparams = model.hparams;
@@ -112,6 +135,11 @@ bool llama_adapter_cvec::apply(
         return false;
     }
 
+    if (mode != LLAMA_CVEC_APPLY_ADD && mode != LLAMA_CVEC_APPLY_PROJECT) {
+        LLAMA_LOG_ERROR("%s: unknown control vector apply mode %d\n", __func__, (int) mode);
+        return false;
+    }
+
     if (tensors.empty()) {
         if (!init(model)) {
             return false;
@@ -120,6 +148,30 @@ bool llama_adapter_cvec::apply(
 
     layer_start = il_start;
     layer_end   = il_end;
+
+    this->mode  = mode;
+    this->alpha = alpha;
+
+    if (mode == LLAMA_CVEC_APPLY_PROJECT) {
+        // Projection assumes unit-norm directions: the removal is alpha*(h.d)d,
+        // which is quadratic in ||d||. A vector that is not normalised silently
+        // over- or under-ablates, so warn per layer rather than let it pass.
+        for (size_t il = 1; il < hparams.n_layer(); il++) {
+            const size_t off = (size_t) n_embd * (il - 1);
+            if (off + n_embd > len) {
+                break;
+            }
+            double sq = 0.0;
+            for (int j = 0; j < n_embd; j++) {
+                sq += (double) data[off + j] * (double) data[off + j];
+            }
+            if (sq > 1e-12 && (sq < 0.98 || sq > 1.02)) {
+                LLAMA_LOG_WARN("%s: layer %zu direction has norm %.4f, expected 1.0; "
+                               "projection strength scales with the square of the norm\n",
+                               __func__, il, sqrt(sq));
+            }
+        }
+    }
 
     for (size_t il = 1; il < hparams.n_layer(); il++) {
         assert(tensors[il] != nullptr);

@@ -707,6 +707,22 @@ extern "C" {
             size_t n_adapters,
             float * scales);
 
+    // How a control vector is combined with the residual stream.
+    //
+    // ADD is the historical behaviour and the only mode before this was added:
+    // it steers *towards* a direction. PROJECT removes the component along the
+    // direction instead, which is what refusal-ablation work actually measures.
+    //
+    // These are different operations, not a scale factor apart. A projective
+    // direction applied additively produces no error and wrong output: it pushes
+    // every token along the refusal axis rather than deleting that component. So
+    // the mode travels with the vector (gguf key `dspark.mode`) and a mismatch is
+    // a hard failure in the loader, never a silent fallback.
+    enum llama_cvec_apply_mode {
+        LLAMA_CVEC_APPLY_ADD     = 0, // h += v
+        LLAMA_CVEC_APPLY_PROJECT = 1, // h -= alpha * (h . d) d   (d must be unit-norm)
+    };
+
     // Apply a loaded control vector to a llama_context, or if data is NULL, clear
     // the currently loaded vector.
     // n_embd should be the size of a single layer's control, and data should point
@@ -718,6 +734,23 @@ extern "C" {
                      const float * data,
                           size_t   len,
                          int32_t   n_embd,
+                         int32_t   il_start,
+                         int32_t   il_end);
+
+    // As llama_set_adapter_cvec, with an explicit apply mode.
+    //
+    // alpha is only read in PROJECT mode, where it is the ablation strength and
+    // 1.0 removes the component exactly. It is a separate parameter rather than
+    // being folded into the vector because projection is quadratic in the
+    // direction's norm -- scaling d by s scales the removal by s^2 -- so a
+    // "strength" baked into the data would not mean what a caller expects.
+    LLAMA_API int32_t llama_set_adapter_cvec_ex(
+            struct llama_context * ctx,
+                     const float * data,
+                          size_t   len,
+                         int32_t   n_embd,
+      enum llama_cvec_apply_mode   mode,
+                           float   alpha,
                          int32_t   il_start,
                          int32_t   il_end);
 
