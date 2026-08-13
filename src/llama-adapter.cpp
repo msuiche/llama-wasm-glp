@@ -36,9 +36,12 @@ ggml_tensor * llama_adapter_cvec::apply_to(ggml_context * ctx, ggml_tensor * cur
         //
         // ggml_mul broadcasts b over a when each of b's dims divides a's, so
         // [1, n_tokens] against [n_embd, n_tokens] repeats the coefficient along
-        // the embedding axis -- exactly the outer product needed. Written with
-        // mul_mat/repeat/mul/scale/sub rather than ggml_out_prod because these
-        // are supported on every backend.
+        // the embedding axis -- exactly the outer product needed.
+        //
+        // ggml_out_prod would do this in one op, but Metal does not implement
+        // GGML_OP_OUT_PROD (only CPU and CUDA do, ggml-cuda.cu:4969), so it would
+        // split the graph and fall back to CPU on Apple silicon. These five ops
+        // run natively on every backend.
         ggml_tensor * coef = ggml_mul_mat(ctx, layer_dir, cur);              // [1, n_tokens]
         ggml_tensor * proj = ggml_mul(ctx, ggml_repeat(ctx, layer_dir, cur), coef);
         cur = ggml_sub(ctx, cur, ggml_scale(ctx, proj, alpha));
