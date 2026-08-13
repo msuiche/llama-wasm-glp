@@ -90,9 +90,14 @@ int main(int argc, char ** argv) {
 
     const std::vector<llama_token> toks = {1, 4, 9, 16, 25};
 
-    auto load = [&](const char * name) {
+    auto load = [&](const char * name) {   // as --control-vector: strength unset
         std::vector<common_control_vector_load_info> in;
-        in.push_back({1.0f, dir + "/" + name});
+        in.push_back({1.0f, dir + "/" + name, false});
+        return common_control_vector_load(in);
+    };
+    auto load_scaled = [&](const char * name, float s) {  // as --control-vector-scaled
+        std::vector<common_control_vector_load_info> in;
+        in.push_back({s, dir + "/" + name, true});
         return common_control_vector_load(in);
     };
     auto set = [&](const common_control_vector_data & cv, float alpha) {
@@ -188,15 +193,20 @@ int main(int argc, char ** argv) {
         expect(common_control_vector_load(in).n_embd == n_embd, "additive vectors still combine");
     }
     {   // strength must not be folded into projective data: alpha carries it
-        std::vector<common_control_vector_load_info> in;
-        in.push_back({2.5f, dir + "/cv-project.gguf"});
-        const auto cv = common_control_vector_load(in);
+        const auto cv = load_scaled("cv-project.gguf", 2.5f);
         expect(cv.n_embd == n_embd && std::fabs(cv.alpha - 2.5f) < 1e-6,
                "strength becomes alpha in project mode");
         double sq = 0.0;
         for (int j = 0; j < n_embd; j++) { sq += (double) cv.data[j]*cv.data[j]; }
         expect(std::fabs(sq - 1.0) < 1e-3, "project data stays unit-norm despite strength");
     }
+
+    // An explicitly requested alpha=1.0 must not be replaced by the file's
+    // dspark.alpha_default of 4.0. Keying on "strength != 1.0" would lose this.
+    expect(std::fabs(load_scaled("cv-project.gguf", 1.0f).alpha - 1.0f) < 1e-6,
+           "explicit alpha=1.0 beats dspark.alpha_default");
+    expect(std::fabs(load("cv-project.gguf").alpha - 4.0f) < 1e-6,
+           "unset strength falls through to dspark.alpha_default");
 
     llama_free(ctx);
     llama_model_free(model);

@@ -1977,15 +1977,20 @@ static common_control_vector_data common_control_vector_load_one(const common_co
 
         if (result.mode == LLAMA_CVEC_APPLY_PROJECT) {
             // strength is the ablation coefficient here, not a data multiplier.
-            result.alpha = load_info.strength;
+            // An explicit --control-vector-scaled wins; otherwise fall to the
+            // file's own alpha. Keyed on strength_set rather than on
+            // "strength != 1.0", so that asking for alpha=1.0 explicitly is
+            // honoured instead of being replaced by the file's default.
             const int aid = gguf_find_key(ctx_gguf, "dspark.alpha_default");
-            if (load_info.strength == 1.0f && aid >= 0 &&
-                    gguf_get_kv_type(ctx_gguf, aid) == GGUF_TYPE_FLOAT32) {
+            const bool have_default = aid >= 0 &&
+                    gguf_get_kv_type(ctx_gguf, aid) == GGUF_TYPE_FLOAT32;
+            if (load_info.strength_set || !have_default) {
+                result.alpha = load_info.strength;
+                COM_INF("%s: mode=project, alpha=%.3f%s\n", load_info.fname.c_str(),
+                        result.alpha, load_info.strength_set ? " (requested)" : "");
+            } else {
                 result.alpha = gguf_get_val_f32(ctx_gguf, aid);
                 COM_INF("%s: mode=project, alpha=%.3f (from dspark.alpha_default)\n",
-                        load_info.fname.c_str(), result.alpha);
-            } else {
-                COM_INF("%s: mode=project, alpha=%.3f\n",
                         load_info.fname.c_str(), result.alpha);
             }
         }

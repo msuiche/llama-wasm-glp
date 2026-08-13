@@ -1077,6 +1077,13 @@ struct common_control_vector_load_info {
     float strength;
 
     std::string fname;
+
+    // Whether `strength` came from the user (--control-vector-scaled) or is just
+    // the 1.0 default (--control-vector). Only project mode needs the
+    // distinction: it uses strength as alpha and otherwise takes
+    // `dspark.alpha_default` from the file, so without this an explicit
+    // "-scaled f:1.0" would be silently overridden by the file's alpha.
+    bool strength_set = false;
 };
 
 // Load control vectors, scale each by strength, and add them together.
