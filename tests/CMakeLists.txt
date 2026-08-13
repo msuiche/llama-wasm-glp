@@ -162,6 +162,12 @@ if (NOT WIN32 OR NOT BUILD_SHARED_LIBS)
     # needs a model: test-cvec-model <model.gguf> <dir with cv-*.gguf>
     # generate the vectors with tests/gen-cvec-fixtures.py
     llama_build(test-cvec-model.cpp)
+    # inspect a real control vector without loading a model:
+    #   test-cvec-inspect <cvec.gguf> [strength]
+    llama_build(test-cvec-inspect.cpp)
+    # pins the direction.N -> graph layer mapping by measurement:
+    #   test-cvec-layer-map <model.gguf> <cvec with one populated slot>
+    llama_build(test-cvec-layer-map.cpp)
     llama_build_and_test(test-chat.cpp WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     target_include_directories(test-chat PRIVATE ${PROJECT_SOURCE_DIR}/tools/server)
     target_link_libraries(test-chat PRIVATE server-context)
