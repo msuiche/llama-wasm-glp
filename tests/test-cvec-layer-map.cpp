@@ -6,7 +6,8 @@
 // (il-1)*n_embd, so the two -1s cancel and tensors[il] holds direction.il --
 // applied at graph layer il. Reading it the first way shifts an entire vector by
 // one layer, which degrades quietly instead of failing: adjacent-layer refusal
-// directions have cosine similarity 0.83-0.91, so the output stays plausible.
+// directions have cosine similarity 0.555-0.979 (mean 0.863), so the output stays
+// plausible.
 //
 // So pin it by measurement rather than by reading. Put a direction in exactly one
 // slot, then use the il_start/il_end range to isolate single layers: the only

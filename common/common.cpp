@@ -2084,7 +2084,8 @@ static common_control_vector_data common_control_vector_load_one(const common_co
     // derived at layers 10..38 while this field still read 10..38. The names are
     // what get applied, so the whole stack shifted one layer, and a one-layer
     // shift degrades rather than fails (adjacent-layer refusal directions have
-    // cosine similarity 0.83-0.91). The file carried the evidence of its own bug
+    // cosine similarity 0.555-0.979, mean 0.863). The file carried the evidence of
+    // its own bug
     // and nothing looked at it.
     if (result.n_embd != -1) {
         const int lid = gguf_find_key(ctx_gguf, "dspark.layer_ids_zero_based");
