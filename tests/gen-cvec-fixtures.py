@@ -40,7 +40,7 @@ write("cv-project.gguf", mode="project")
 write("cv-project2.gguf", mode="project", seed=99)
 write("cv-badmode.gguf", mode="sculpt")                    # must be refused
 write("cv-badhook.gguf", mode="project", hook="attn_wo_output")  # must be refused
-write("cv-add.gguf", mode=None)   # legacy additive: no dspark.* keys at all
+write("cv-add.gguf", mode=None)   # legacy additive: no glp.* keys at all
 
 
 def write_dup_layer(name):
