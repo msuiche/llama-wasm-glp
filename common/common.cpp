@@ -23,6 +23,7 @@
 #include <iostream>
 #include <iterator>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -1438,11 +1439,13 @@ common_init_result_ptr common_init_from_params(common_params & params, bool mode
             return res;
         }
 
-        int err = llama_set_adapter_cvec(
+        int err = llama_set_adapter_cvec_ex(
                 lctx,
                 cvec.data.data(),
                 cvec.data.size(),
                 cvec.n_embd,
+                cvec.mode,
+                cvec.alpha,
                 params.control_vector_layer_start,
                 params.control_vector_layer_end);
         if (err) {
@@ -1932,6 +1935,75 @@ static common_control_vector_data common_control_vector_load_one(const common_co
         COM_WRN("no direction tensors found in %s\n", load_info.fname.c_str());
     }
 
+    // Apply mode travels with the file. Absent key == additive, which is what
+    // every control vector written before this key existed is. An unrecognised
+    // value is fatal: applying a projective direction additively is not an error
+    // at runtime, it is just wrong output, so there is nothing safe to fall back
+    // to. See llama_cvec_apply_mode in llama.h.
+    {
+        const int kid = gguf_find_key(ctx_gguf, "glp.mode");
+        if (kid >= 0 && gguf_get_kv_type(ctx_gguf, kid) == GGUF_TYPE_STRING) {
+            const std::string m = gguf_get_val_str(ctx_gguf, kid);
+            if (m == "project") {
+                result.mode = LLAMA_CVEC_APPLY_PROJECT;
+            } else if (m == "add") {
+                result.mode = LLAMA_CVEC_APPLY_ADD;
+            } else {
+                COM_ERR("%s: unsupported glp.mode '%s'; refusing to apply\n",
+                        load_info.fname.c_str(), m.c_str());
+                gguf_free(ctx_gguf);
+                ggml_free(ctx);
+                result.n_embd = -1;
+                return result;
+            }
+        }
+
+        // The vector was measured at one hook point and is ~9x weaker elsewhere.
+        // build_cvec() runs on the post-layer residual (after the FFN residual
+        // add, before l_out), so that is the only value we can honour.
+        const int hid = gguf_find_key(ctx_gguf, "glp.hook_point");
+        if (hid >= 0 && gguf_get_kv_type(ctx_gguf, hid) == GGUF_TYPE_STRING) {
+            const std::string h = gguf_get_val_str(ctx_gguf, hid);
+            if (h != "residual_stream_post_layer") {
+                COM_ERR("%s: glp.hook_point '%s' is not where llama.cpp applies "
+                        "control vectors (residual_stream_post_layer); refusing\n",
+                        load_info.fname.c_str(), h.c_str());
+                gguf_free(ctx_gguf);
+                ggml_free(ctx);
+                result.n_embd = -1;
+                return result;
+            }
+        }
+
+        if (result.mode == LLAMA_CVEC_APPLY_PROJECT) {
+            // strength is the ablation coefficient here, not a data multiplier.
+            // An explicit --control-vector-scaled wins; otherwise fall to the
+            // file's own alpha. Keyed on strength_set rather than on
+            // "strength != 1.0", so that asking for alpha=1.0 explicitly is
+            // honoured instead of being replaced by the file's default.
+            const int aid = gguf_find_key(ctx_gguf, "glp.alpha_default");
+            const bool have_default = aid >= 0 &&
+                    gguf_get_kv_type(ctx_gguf, aid) == GGUF_TYPE_FLOAT32;
+            if (load_info.strength_set || !have_default) {
+                result.alpha = load_info.strength;
+                COM_INF("%s: mode=project, alpha=%.3f%s\n", load_info.fname.c_str(),
+                        result.alpha, load_info.strength_set ? " (requested)" : "");
+            } else {
+                result.alpha = gguf_get_val_f32(ctx_gguf, aid);
+                COM_INF("%s: mode=project, alpha=%.3f (from glp.alpha_default)\n",
+                        load_info.fname.c_str(), result.alpha);
+            }
+        }
+    }
+
+    // project mode forbids two directions for the same layer, so track which
+    // layers have been filled. Checking whether the destination is still zero
+    // would misjudge a direction that happens to be zero in the probed positions.
+    std::set<int> seen_layers;
+
+    // Every layer index seen, in both modes, for the cross-check after the loop.
+    std::set<int> all_layers;
+
     for (int i = 0; i < n_tensors; i++) {
         std::string name = gguf_get_tensor_name(ctx_gguf, i);
 
@@ -1976,15 +2048,70 @@ static common_control_vector_data common_control_vector_load_one(const common_co
             break;
         }
 
+        all_layers.insert(layer_idx);
+
         // extend if necessary - do not store data for layer 0 (it's not used)
         result.data.resize(std::max(result.data.size(), static_cast<size_t>(result.n_embd * layer_idx)), 0.0f);
 
         const float * src = (const float *) tensor->data;
         float * dst = result.data.data() + result.n_embd * (layer_idx - 1);  // layer 1 at [0]
-        for (int j = 0; j < result.n_embd; j++) {
-            dst[j] += src[j] * load_info.strength;  // allows multiple directions for same layer in same file
+        if (result.mode == LLAMA_CVEC_APPLY_PROJECT) {
+            // Copy verbatim: strength became alpha above. Scaling here would make
+            // the ablation scale with the square of strength, and accumulating a
+            // second direction into the same layer would silently produce a
+            // non-unit vector that is not a projection axis at all.
+            if (!seen_layers.insert(layer_idx).second) {
+                COM_ERR("%s: two direction tensors for layer %d in project mode; "
+                        "directions do not sum into a projection axis\n",
+                        load_info.fname.c_str(), layer_idx);
+                result.n_embd = -1;
+                break;
+            }
+            for (int j = 0; j < result.n_embd; j++) {
+                dst[j] = src[j];
+            }
+        } else {
+            for (int j = 0; j < result.n_embd; j++) {
+                dst[j] += src[j] * load_info.strength;  // allows multiple directions for same layer in same file
+            }
         }
 
+    }
+
+    // Cross-check the tensor names against glp.layer_ids_zero_based. Both are
+    // written from the same source, so a disagreement means a broken exporter --
+    // which happened once: an exporter emitted direction.11..39 for directions
+    // derived at layers 10..38 while this field still read 10..38. The names are
+    // what get applied, so the whole stack shifted one layer, and a one-layer
+    // shift degrades rather than fails (adjacent-layer refusal directions have
+    // cosine similarity 0.555-0.979, mean 0.863). The file carried the evidence of
+    // its own bug
+    // and nothing looked at it.
+    if (result.n_embd != -1) {
+        const int lid = gguf_find_key(ctx_gguf, "glp.layer_ids_zero_based");
+        if (lid >= 0 && gguf_get_kv_type(ctx_gguf, lid) == GGUF_TYPE_STRING) {
+            std::set<int> declared;
+            bool parsed = true;
+            for (const auto & tok : string_split<std::string>(gguf_get_val_str(ctx_gguf, lid), ',')) {
+                try {
+                    declared.insert(std::stoi(tok));
+                } catch (...) {
+                    parsed = false;
+                    break;
+                }
+            }
+            if (parsed && !declared.empty() && declared != all_layers) {
+                COM_ERR("%s: glp.layer_ids_zero_based declares %zu layers (%d..%d) but the "
+                        "direction tensors resolve to %zu (%d..%d). The tensor names are what "
+                        "get applied, so this file would steer the wrong layers.\n",
+                        load_info.fname.c_str(),
+                        declared.size(), *declared.begin(), *declared.rbegin(),
+                        all_layers.size(),
+                        all_layers.empty() ? -1 : *all_layers.begin(),
+                        all_layers.empty() ? -1 : *all_layers.rbegin());
+                result.n_embd = -1;
+            }
+        }
     }
 
     if (result.n_embd == -1) {
@@ -2010,6 +2137,19 @@ common_control_vector_data common_control_vector_load(const std::vector<common_c
         }
         if (result.n_embd != -1 && result.n_embd != cur.n_embd) {
             COM_ERR("control vectors in %s does not match previous dimensions\n", info.fname.c_str());
+            result.n_embd = -1;
+            break;
+        }
+
+        // Combining below is elementwise addition, which is only meaningful for
+        // additive vectors. Projection is not linear in the direction, so a
+        // project-mode file cannot be merged with anything -- not with an
+        // additive vector and not with another projection.
+        if (result.n_embd != -1 &&
+                (result.mode == LLAMA_CVEC_APPLY_PROJECT || cur.mode == LLAMA_CVEC_APPLY_PROJECT)) {
+            COM_ERR("%s is project mode; project-mode control vectors cannot be "
+                    "combined with other control vectors. Pass exactly one.\n",
+                    info.fname.c_str());
             result.n_embd = -1;
             break;
         }

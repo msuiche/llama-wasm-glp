@@ -2950,7 +2950,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
                 if (parts.size() != 2) {
                     throw std::invalid_argument("control-vector-scaled format: FNAME:SCALE");
                 }
-                params.control_vectors.push_back({ std::stof(parts[1]), parts[0] });
+                params.control_vectors.push_back({ std::stof(parts[1]), parts[0], true });
             }
         }
     ));

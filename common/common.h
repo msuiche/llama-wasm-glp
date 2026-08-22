@@ -1061,16 +1061,37 @@ struct common_control_vector_data {
 
     // stores data for layers [1, n_layer] where n_layer = data.size() / n_embd
     std::vector<float> data;
+
+    // How to combine this with the residual stream. Read from the gguf key
+    // `glp.mode`; files without it are ADD, which is what every control
+    // vector predating the key is. See llama_cvec_apply_mode in llama.h.
+    llama_cvec_apply_mode mode = LLAMA_CVEC_APPLY_ADD;
+
+    // PROJECT mode only: ablation strength. Carries `--control-vector-scaled`
+    // strength (or `glp.alpha_default`) rather than being multiplied into the
+    // data, because projection is quadratic in the direction's norm.
+    float alpha = 1.0f;
 };
 
 struct common_control_vector_load_info {
     float strength;
 
     std::string fname;
+
+    // Whether `strength` came from the user (--control-vector-scaled) or is just
+    // the 1.0 default (--control-vector). Only project mode needs the
+    // distinction: it uses strength as alpha and otherwise takes
+    // `glp.alpha_default` from the file, so without this an explicit
+    // "-scaled f:1.0" would be silently overridden by the file's alpha.
+    bool strength_set = false;
 };
 
 // Load control vectors, scale each by strength, and add them together.
 // On error, returns {-1, empty}
+//
+// Summing is only valid for additive vectors. A PROJECT-mode file is rejected if
+// combined with anything else: two projections do not compose into a projection
+// along the sum of their directions.
 common_control_vector_data common_control_vector_load(const std::vector<common_control_vector_load_info> & load_infos);
 
 //
