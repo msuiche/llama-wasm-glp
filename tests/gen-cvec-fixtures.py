@@ -20,11 +20,11 @@ def write(name, mode=None, hook="residual_stream_post_layer", alpha=4.0, seed=7)
     w.add_string("controlvector.model_hint", "llama")
     w.add_uint32("controlvector.layer_count", n_layer)
     if mode is not None:
-        w.add_string("dspark.mode", mode)
-        w.add_uint32("dspark.spec_version", 1)
-        w.add_float32("dspark.alpha_default", alpha)
+        w.add_string("glp.mode", mode)
+        w.add_uint32("glp.spec_version", 1)
+        w.add_float32("glp.alpha_default", alpha)
         if hook is not None:
-            w.add_string("dspark.hook_point", hook)
+            w.add_string("glp.hook_point", hook)
     for il in range(1, n_layer + 1):          # direction.N is 1-based
         v = r.standard_normal(n_embd).astype(np.float32)
         v /= np.linalg.norm(v)
@@ -53,10 +53,10 @@ def write_dup_layer(name):
     w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
     w.add_string("controlvector.model_hint", "llama")
     w.add_uint32("controlvector.layer_count", 2)
-    w.add_string("dspark.mode", "project")
-    w.add_uint32("dspark.spec_version", 1)
-    w.add_float32("dspark.alpha_default", 1.0)
-    w.add_string("dspark.hook_point", "residual_stream_post_layer")
+    w.add_string("glp.mode", "project")
+    w.add_uint32("glp.spec_version", 1)
+    w.add_float32("glp.alpha_default", 1.0)
+    w.add_string("glp.hook_point", "residual_stream_post_layer")
     for nm in ("direction.2", "direction.02"):
         v = r.standard_normal(n_embd).astype(np.float32)
         v /= np.linalg.norm(v)
@@ -77,10 +77,10 @@ def write_single(name, slot):
     w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
     w.add_string("controlvector.model_hint", "llama")
     w.add_uint32("controlvector.layer_count", 1)
-    w.add_string("dspark.mode", "project")
-    w.add_uint32("dspark.spec_version", 1)
-    w.add_float32("dspark.alpha_default", 1.0)
-    w.add_string("dspark.hook_point", "residual_stream_post_layer")
+    w.add_string("glp.mode", "project")
+    w.add_uint32("glp.spec_version", 1)
+    w.add_float32("glp.alpha_default", 1.0)
+    w.add_string("glp.hook_point", "residual_stream_post_layer")
     v = r.standard_normal(n_embd).astype(np.float32)
     v /= np.linalg.norm(v)
     w.add_tensor(f"direction.{slot}", v)
@@ -95,7 +95,7 @@ write_single("cv-single3.gguf", 3)
 
 
 def write_shifted(name, offset=1):
-    """Tensor names disagreeing with dspark.layer_ids_zero_based.
+    """Tensor names disagreeing with glp.layer_ids_zero_based.
 
     Reproduces a real exporter bug: directions derived at layers 1..3 written as
     direction.2..4 while the metadata still declared 1,2,3. The names are what get
@@ -108,11 +108,11 @@ def write_shifted(name, offset=1):
     w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
     w.add_string("controlvector.model_hint", "llama")
     w.add_uint32("controlvector.layer_count", len(layers))
-    w.add_string("dspark.mode", "project")
-    w.add_uint32("dspark.spec_version", 1)
-    w.add_float32("dspark.alpha_default", 1.0)
-    w.add_string("dspark.hook_point", "residual_stream_post_layer")
-    w.add_string("dspark.layer_ids_zero_based", ",".join(str(l) for l in layers))
+    w.add_string("glp.mode", "project")
+    w.add_uint32("glp.spec_version", 1)
+    w.add_float32("glp.alpha_default", 1.0)
+    w.add_string("glp.hook_point", "residual_stream_post_layer")
+    w.add_string("glp.layer_ids_zero_based", ",".join(str(l) for l in layers))
     for l in layers:
         v = r.standard_normal(n_embd).astype(np.float32)
         v /= np.linalg.norm(v)
@@ -134,11 +134,11 @@ def write_consistent(name):
     w = gguf.GGUFWriter(f"{out_dir}/{name}", "controlvector")
     w.add_string("controlvector.model_hint", "llama")
     w.add_uint32("controlvector.layer_count", len(layers))
-    w.add_string("dspark.mode", "project")
-    w.add_uint32("dspark.spec_version", 1)
-    w.add_float32("dspark.alpha_default", 1.0)
-    w.add_string("dspark.hook_point", "residual_stream_post_layer")
-    w.add_string("dspark.layer_ids_zero_based", ",".join(str(l) for l in layers))
+    w.add_string("glp.mode", "project")
+    w.add_uint32("glp.spec_version", 1)
+    w.add_float32("glp.alpha_default", 1.0)
+    w.add_string("glp.hook_point", "residual_stream_post_layer")
+    w.add_string("glp.layer_ids_zero_based", ",".join(str(l) for l in layers))
     for l in layers:
         v = r.standard_normal(n_embd).astype(np.float32)
         v /= np.linalg.norm(v)

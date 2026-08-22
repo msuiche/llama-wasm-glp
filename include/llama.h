@@ -716,7 +716,7 @@ extern "C" {
     // These are different operations, not a scale factor apart. A projective
     // direction applied additively produces no error and wrong output: it pushes
     // every token along the refusal axis rather than deleting that component. So
-    // the mode travels with the vector (gguf key `dspark.mode`) and a mismatch is
+    // the mode travels with the vector (gguf key `glp.mode`) and a mismatch is
     // a hard failure in the loader, never a silent fallback.
     enum llama_cvec_apply_mode {
         LLAMA_CVEC_APPLY_ADD     = 0, // h += v

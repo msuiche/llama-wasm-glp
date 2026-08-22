@@ -1063,12 +1063,12 @@ struct common_control_vector_data {
     std::vector<float> data;
 
     // How to combine this with the residual stream. Read from the gguf key
-    // `dspark.mode`; files without it are ADD, which is what every control
+    // `glp.mode`; files without it are ADD, which is what every control
     // vector predating the key is. See llama_cvec_apply_mode in llama.h.
     llama_cvec_apply_mode mode = LLAMA_CVEC_APPLY_ADD;
 
     // PROJECT mode only: ablation strength. Carries `--control-vector-scaled`
-    // strength (or `dspark.alpha_default`) rather than being multiplied into the
+    // strength (or `glp.alpha_default`) rather than being multiplied into the
     // data, because projection is quadratic in the direction's norm.
     float alpha = 1.0f;
 };
@@ -1081,7 +1081,7 @@ struct common_control_vector_load_info {
     // Whether `strength` came from the user (--control-vector-scaled) or is just
     // the 1.0 default (--control-vector). Only project mode needs the
     // distinction: it uses strength as alpha and otherwise takes
-    // `dspark.alpha_default` from the file, so without this an explicit
+    // `glp.alpha_default` from the file, so without this an explicit
     // "-scaled f:1.0" would be silently overridden by the file's alpha.
     bool strength_set = false;
 };

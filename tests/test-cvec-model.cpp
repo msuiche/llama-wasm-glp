@@ -116,11 +116,11 @@ int main(int argc, char ** argv) {
     expect(proj.n_embd == n_embd && proj.mode == LLAMA_CVEC_APPLY_PROJECT,
            "project file loads with mode=project");
     expect(std::fabs(proj.alpha - 4.0f) < 1e-6,
-           "alpha taken from dspark.alpha_default");
+           "alpha taken from glp.alpha_default");
 
     const auto add = load("cv-add.gguf");
     expect(add.n_embd == n_embd && add.mode == LLAMA_CVEC_APPLY_ADD,
-           "file without dspark.mode defaults to add");
+           "file without glp.mode defaults to add");
 
     // ---- alpha = 0 must be bit-identical to no vector at all --------------
     expect(set(proj, 0.0f), "project apply accepted at alpha=0");
@@ -170,11 +170,11 @@ int main(int argc, char ** argv) {
     }
 
     // ---- loader refusals ---------------------------------------------------
-    expect(load("cv-badmode.gguf").n_embd == -1, "unknown dspark.mode is refused");
-    expect(load("cv-badhook.gguf").n_embd == -1, "mismatched dspark.hook_point is refused");
+    expect(load("cv-badmode.gguf").n_embd == -1, "unknown glp.mode is refused");
+    expect(load("cv-badhook.gguf").n_embd == -1, "mismatched glp.hook_point is refused");
     expect(load("cv-duplayer.gguf").n_embd == -1, "two directions for one layer are refused");
 
-    // A file whose tensor names disagree with dspark.layer_ids_zero_based was
+    // A file whose tensor names disagree with glp.layer_ids_zero_based was
     // produced by a broken exporter. The names are what get applied, so it would
     // steer the wrong layers -- silently, since a one-layer shift degrades rather
     // than fails. Refuse it, and do not false-positive on the correct file.
@@ -211,11 +211,11 @@ int main(int argc, char ** argv) {
     }
 
     // An explicitly requested alpha=1.0 must not be replaced by the file's
-    // dspark.alpha_default of 4.0. Keying on "strength != 1.0" would lose this.
+    // glp.alpha_default of 4.0. Keying on "strength != 1.0" would lose this.
     expect(std::fabs(load_scaled("cv-project.gguf", 1.0f).alpha - 1.0f) < 1e-6,
-           "explicit alpha=1.0 beats dspark.alpha_default");
+           "explicit alpha=1.0 beats glp.alpha_default");
     expect(std::fabs(load("cv-project.gguf").alpha - 4.0f) < 1e-6,
-           "unset strength falls through to dspark.alpha_default");
+           "unset strength falls through to glp.alpha_default");
 
     llama_free(ctx);
     llama_model_free(model);

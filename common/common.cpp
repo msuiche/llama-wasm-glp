@@ -1941,7 +1941,7 @@ static common_control_vector_data common_control_vector_load_one(const common_co
     // at runtime, it is just wrong output, so there is nothing safe to fall back
     // to. See llama_cvec_apply_mode in llama.h.
     {
-        const int kid = gguf_find_key(ctx_gguf, "dspark.mode");
+        const int kid = gguf_find_key(ctx_gguf, "glp.mode");
         if (kid >= 0 && gguf_get_kv_type(ctx_gguf, kid) == GGUF_TYPE_STRING) {
             const std::string m = gguf_get_val_str(ctx_gguf, kid);
             if (m == "project") {
@@ -1949,7 +1949,7 @@ static common_control_vector_data common_control_vector_load_one(const common_co
             } else if (m == "add") {
                 result.mode = LLAMA_CVEC_APPLY_ADD;
             } else {
-                COM_ERR("%s: unsupported dspark.mode '%s'; refusing to apply\n",
+                COM_ERR("%s: unsupported glp.mode '%s'; refusing to apply\n",
                         load_info.fname.c_str(), m.c_str());
                 gguf_free(ctx_gguf);
                 ggml_free(ctx);
@@ -1961,11 +1961,11 @@ static common_control_vector_data common_control_vector_load_one(const common_co
         // The vector was measured at one hook point and is ~9x weaker elsewhere.
         // build_cvec() runs on the post-layer residual (after the FFN residual
         // add, before l_out), so that is the only value we can honour.
-        const int hid = gguf_find_key(ctx_gguf, "dspark.hook_point");
+        const int hid = gguf_find_key(ctx_gguf, "glp.hook_point");
         if (hid >= 0 && gguf_get_kv_type(ctx_gguf, hid) == GGUF_TYPE_STRING) {
             const std::string h = gguf_get_val_str(ctx_gguf, hid);
             if (h != "residual_stream_post_layer") {
-                COM_ERR("%s: dspark.hook_point '%s' is not where llama.cpp applies "
+                COM_ERR("%s: glp.hook_point '%s' is not where llama.cpp applies "
                         "control vectors (residual_stream_post_layer); refusing\n",
                         load_info.fname.c_str(), h.c_str());
                 gguf_free(ctx_gguf);
@@ -1981,7 +1981,7 @@ static common_control_vector_data common_control_vector_load_one(const common_co
             // file's own alpha. Keyed on strength_set rather than on
             // "strength != 1.0", so that asking for alpha=1.0 explicitly is
             // honoured instead of being replaced by the file's default.
-            const int aid = gguf_find_key(ctx_gguf, "dspark.alpha_default");
+            const int aid = gguf_find_key(ctx_gguf, "glp.alpha_default");
             const bool have_default = aid >= 0 &&
                     gguf_get_kv_type(ctx_gguf, aid) == GGUF_TYPE_FLOAT32;
             if (load_info.strength_set || !have_default) {
@@ -1990,7 +1990,7 @@ static common_control_vector_data common_control_vector_load_one(const common_co
                         result.alpha, load_info.strength_set ? " (requested)" : "");
             } else {
                 result.alpha = gguf_get_val_f32(ctx_gguf, aid);
-                COM_INF("%s: mode=project, alpha=%.3f (from dspark.alpha_default)\n",
+                COM_INF("%s: mode=project, alpha=%.3f (from glp.alpha_default)\n",
                         load_info.fname.c_str(), result.alpha);
             }
         }
@@ -2078,7 +2078,7 @@ static common_control_vector_data common_control_vector_load_one(const common_co
 
     }
 
-    // Cross-check the tensor names against dspark.layer_ids_zero_based. Both are
+    // Cross-check the tensor names against glp.layer_ids_zero_based. Both are
     // written from the same source, so a disagreement means a broken exporter --
     // which happened once: an exporter emitted direction.11..39 for directions
     // derived at layers 10..38 while this field still read 10..38. The names are
@@ -2088,7 +2088,7 @@ static common_control_vector_data common_control_vector_load_one(const common_co
     // its own bug
     // and nothing looked at it.
     if (result.n_embd != -1) {
-        const int lid = gguf_find_key(ctx_gguf, "dspark.layer_ids_zero_based");
+        const int lid = gguf_find_key(ctx_gguf, "glp.layer_ids_zero_based");
         if (lid >= 0 && gguf_get_kv_type(ctx_gguf, lid) == GGUF_TYPE_STRING) {
             std::set<int> declared;
             bool parsed = true;
@@ -2101,7 +2101,7 @@ static common_control_vector_data common_control_vector_load_one(const common_co
                 }
             }
             if (parsed && !declared.empty() && declared != all_layers) {
-                COM_ERR("%s: dspark.layer_ids_zero_based declares %zu layers (%d..%d) but the "
+                COM_ERR("%s: glp.layer_ids_zero_based declares %zu layers (%d..%d) but the "
                         "direction tensors resolve to %zu (%d..%d). The tensor names are what "
                         "get applied, so this file would steer the wrong layers.\n",
                         load_info.fname.c_str(),
