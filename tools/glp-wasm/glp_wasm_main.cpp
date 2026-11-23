@@ -153,17 +153,17 @@ std::string glp_generate(const std::string & prompt, int max_new) {
 // via emscripten::async() — synchronous wrappers throw SuspendError. The CPU
 // build stays synchronous (also keeps Bun's JSCore, which lacks
 // WebAssembly.promising, able to run the local test).
-#ifdef GLP_WEBGPU
-#define GLP_ASYNC emscripten::async()
-#else
-#define GLP_ASYNC
-#endif
-
 EMSCRIPTEN_BINDINGS(glp_demo) {
-    emscripten::function("loadModel", &glp_load_model, GLP_ASYNC);
-    emscripten::function("loadVector", &glp_load_vector, GLP_ASYNC);
+#ifdef GLP_WEBGPU
+    emscripten::function("loadModel", &glp_load_model, emscripten::async());
+    emscripten::function("loadVector", &glp_load_vector, emscripten::async());
+    emscripten::function("generate", &glp_generate, emscripten::async());
+#else
+    emscripten::function("loadModel", &glp_load_model);
+    emscripten::function("loadVector", &glp_load_vector);
+    emscripten::function("generate", &glp_generate);
+#endif
     emscripten::function("setAlpha", &glp_set_alpha);
-    emscripten::function("generate", &glp_generate, GLP_ASYNC);
     emscripten::function("onToken", &glp_on_token);
 }
 
