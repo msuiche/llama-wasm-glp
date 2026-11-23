@@ -22,7 +22,7 @@ import modal
 HERE = pathlib.Path(__file__).resolve().parent
 
 LLAMA_REPO = "https://github.com/msuiche/llama.cpp"
-LLAMA_SHA = "PIN_ME"  # commit of the glp-wasm branch to build
+LLAMA_SHA = "bd7f11864cd688387f14c885a7e645a161238a41"  # commit of the glp-wasm branch to build
 
 EMSDK_VER = "4.0.10"
 
