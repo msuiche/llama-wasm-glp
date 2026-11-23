@@ -5,7 +5,7 @@ GLP-steered answers), generated live in the visitor's browser. No server, no
 weight modification — the GLP vector is applied to the residual stream at
 runtime via `llama_set_adapter_cvec` (projective mode, `h ← h − α(h·d̂)d̂`).
 
-This branch (`glp-wasm` on `msuiche/llama.cpp`) is the source of truth:
+This branch (`glp-wasm` on `msuiche/llama-wasm-glp`) is the source of truth:
 upstream llama.cpp + the GLP projective control-vector support (8 files:
 `common/common.{cpp,h}`, `include/llama.h`, `src/llama-adapter.{cpp,h}`,
 `src/llama-context.{cpp,h}`, `src/models/deepseek41.cpp`) + this directory.
