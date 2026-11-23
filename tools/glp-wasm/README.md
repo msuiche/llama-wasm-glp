@@ -27,7 +27,19 @@ upstream llama.cpp + the GLP projective control-vector support (8 files:
 modal run tools/glp-wasm/modal_wasm_build.py
 ```
 
-Outputs land in the Modal volume `llama-glp-wasm` (dir `llama-glp-wasm/`).
+Builds **two variants** from the same pinned source (`glp-wasm-v2` tag):
+
+- **WebGPU** (`GGML_WEBGPU=ON`, pinned Dawn emdawnwebgpu package, **JSPI** +
+  `-fwasm-exceptions`): ~50 tok/s on GPU browsers (Chrome 137+). JSPI, not
+  ASYNCIFY — binaryen's Asyncify pass crashes (UNREACHABLE) on this build.
+  `loadModel`/`loadVector`/`generate` are `emscripten::async()` under
+  `GLP_WEBGPU` so embind wraps them with `WebAssembly.promising`; synchronous
+  bindings throw `SuspendError: trying to suspend without
+  WebAssembly.promising`. The worker awaits these calls.
+- **CPU** (simd128, single-threaded): fallback for everything else, ~3.5 tok/s.
+
+Outputs land in the Modal volume `llama-glp-wasm` (dir `llama-glp-wasm/`):
+`glp-demo.js/.wasm` (CPU), `glp-demo-webgpu.js/.wasm` (WebGPU), `vector.gguf`.
 The steering vector is reused from the volume; to (re)upload it, place a
 `vector.gguf` next to `modal_wasm_build.py` before running.
 
@@ -45,12 +57,14 @@ engages with the request. Model: `ggml-org/Qwen3-1.7B-GGUF` (`Q4_K_M`, ~1.3 GB).
 
 ## Deploy
 
-Copy **both** artifacts together — a new wasm with a stale loader fails at
-instantiation with `LinkError: function import requires a callable`:
+Copy **each variant's** artifacts together — a new wasm with a stale loader
+fails at instantiation with `LinkError: function import requires a callable`:
 
 ```sh
-cp glp-demo.js   <site>/glp-wasm-loader.js
-cp glp-demo.wasm <site>/glp-demo.wasm
+cp glp-demo.js         <site>/glp-wasm-loader.js
+cp glp-demo.wasm       <site>/glp-demo.wasm
+cp glp-demo-webgpu.js  <site>/glp-webgpu-loader.js
+cp glp-demo-webgpu.wasm <site>/glp-demo-webgpu.wasm
 ```
 
 The site is `weightless.msuiche.com` (`index.html`, `glp-demo.js` = page logic,
