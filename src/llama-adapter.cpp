@@ -85,10 +85,10 @@ bool llama_adapter_cvec::init(const llama_model & model) {
         return it->second;
     };
 
-    // make tensors
+    // make tensors (layer 0 included: direction.0 is expressible for
+    // residual_stream_post_layer and applied when the file carries it)
     tensors.reserve(hparams.n_layer());
-    tensors.push_back(nullptr); // there's never a tensor for layer 0
-    for (size_t il = 1; il < hparams.n_layer(); il++) {
+    for (size_t il = 0; il < hparams.n_layer(); il++) {
         ggml_backend_buffer_type_t buft = model.select_buft(il);
         ggml_context * ctx = ctx_for_buft(buft);
         if (!ctx) {
@@ -154,10 +154,16 @@ bool llama_adapter_cvec::apply(
     for (size_t il = 1; il < hparams.n_layer(); il++) {
         assert(tensors[il] != nullptr);
 
-        const size_t off = n_embd * (il - 1); // buffer doesn't have data for layer 0, since it's never present
+        const size_t off = n_embd * (il - 1); // layers >= 1 keep their layout
         if (off + n_embd <= len) {
             ggml_backend_tensor_set(tensors[il], data + off, 0, n_embd * ggml_element_size(tensors[il]));
         }
+    }
+
+    // direction.0 rides as a trailing slot, present only when the loader armed
+    // layer 0 (layer_start == 0 implies the file carried direction.0)
+    if (layer_start == 0 && len >= (size_t) n_embd) {
+        ggml_backend_tensor_set(tensors[0], data + (len - n_embd), 0, n_embd * ggml_element_size(tensors[0]));
     }
 
     return true;

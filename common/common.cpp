@@ -1461,7 +1461,6 @@ common_init_result_ptr common_init_from_params(common_params & params, bool mode
     }
 
     if (!params.control_vectors.empty()) {
-        if (params.control_vector_layer_start <= 0) params.control_vector_layer_start = 1;
         if (params.control_vector_layer_end   <= 0) params.control_vector_layer_end   = llama_model_n_layer(model);
 
         const auto cvec = common_control_vector_load(params.control_vectors, llama_model_n_layer(model));
@@ -1469,10 +1468,20 @@ common_init_result_ptr common_init_from_params(common_params & params, bool mode
             return res;
         }
 
+        // layer 0 is armed only when a file actually carries direction.0;
+        // otherwise coverage starts at layer 1 as before
+        if (params.control_vector_layer_start <= 0) {
+            params.control_vector_layer_start = cvec.data0.empty() ? 1 : 0;
+        }
+
+        // layers >= 1 keep their layout; direction.0 rides as a trailing slot
+        std::vector<float> combined = cvec.data;
+        combined.insert(combined.end(), cvec.data0.begin(), cvec.data0.end());
+
         int err = llama_set_adapter_cvec(
                 lctx,
-                cvec.data.data(),
-                cvec.data.size(),
+                combined.data(),
+                combined.size(),
                 cvec.n_embd,
                 cvec.apply_mode,
                 cvec.alpha,
@@ -2075,10 +2084,6 @@ static common_control_vector_data common_control_vector_load_one(const common_co
             COM_ERR("invalid/unparsable direction tensor layer index in %s\n", load_info.fname.c_str());
             result.n_embd = -1;
             break;
-        } else if (layer_idx == 0) {
-            COM_ERR("invalid (zero) direction tensor layer index in %s\n", load_info.fname.c_str());
-            result.n_embd = -1;
-            break;
         } else if (layer_idx > n_layer) {
             COM_ERR("direction tensor layer index %d exceeds the model layer count %d in %s\n", layer_idx, n_layer, load_info.fname.c_str());
             result.n_embd = -1;
@@ -2105,10 +2110,20 @@ static common_control_vector_data common_control_vector_load_one(const common_co
             break;
         }
 
-        // extend if necessary - do not store data for layer 0 (it's not used)
+        const float * src = (const float *) tensor->data;
+        if (layer_idx == 0) {
+            // direction.0: expressible for residual_stream_post_layer (the only
+            // hook this loader accepts), stored separately from layers >= 1
+            result.data0.resize(result.n_embd, 0.0f);
+            for (int j = 0; j < result.n_embd; j++) {
+                result.data0[j] += src[j] * load_info.strength;
+            }
+            continue;
+        }
+
+        // extend if necessary - layer N at [(N-1) * n_embd]
         result.data.resize(std::max(result.data.size(), (size_t) result.n_embd * layer_idx), 0.0f);
 
-        const float * src = (const float *) tensor->data;
         float * dst = result.data.data() + (size_t) result.n_embd * (layer_idx - 1);  // layer 1 at [0]
         for (int j = 0; j < result.n_embd; j++) {
             dst[j] += src[j] * load_info.strength;  // allows multiple directions for same layer in same file
@@ -2154,6 +2169,10 @@ common_control_vector_data common_control_vector_load(const std::vector<common_c
             result.data.resize(std::max(result.data.size(), cur.data.size()), 0.0f);  // extend if necessary
             for (size_t i = 0; i < cur.data.size(); i++) {
                 result.data[i] += cur.data[i];
+            }
+            result.data0.resize(std::max(result.data0.size(), cur.data0.size()), 0.0f);
+            for (size_t i = 0; i < cur.data0.size(); i++) {
+                result.data0[i] += cur.data0[i];
             }
         }
     }
