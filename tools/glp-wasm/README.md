@@ -10,6 +10,13 @@ upstream llama.cpp + the GLP projective control-vector support (8 files:
 `common/common.{cpp,h}`, `include/llama.h`, `src/llama-adapter.{cpp,h}`,
 `src/llama-context.{cpp,h}`, `src/models/deepseek41.cpp`) + this directory.
 
+The `direction-0` branch adds **`direction.0` support** for
+`residual_stream_post_layer` (msuiche/weightless#11): the loader stores layer 0
+in a separate `data0` (merged independently), arms it only when a file carries
+it, and the adapter applies it at the output of layer 0. Layers ≥ 1 keep their
+layout; files without `direction.0` behave exactly as before. Fold-site
+mappings still reject `direction.0`.
+
 ## Files
 
 - `glp_wasm_main.cpp` — embind entry: `loadModel` / `loadVector` / `setAlpha` /

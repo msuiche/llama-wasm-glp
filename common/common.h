@@ -1264,6 +1264,10 @@ struct common_control_vector_data {
 
     // stores data for layers [1, n_layer] where n_layer = data.size() / n_embd
     std::vector<float> data;
+
+    // optional direction.0 (GLP: residual_stream_post_layer only). Layer 0 is
+    // producer-gated: present only when the file carries direction.0.
+    std::vector<float> data0;
 };
 
 struct common_control_vector_load_info {

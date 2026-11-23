@@ -16,6 +16,7 @@ static llama_model * g_model = nullptr;
 static llama_context * g_ctx = nullptr;
 static const llama_vocab * g_vocab = nullptr;
 static int g_n_embd = 0;
+static bool g_has_l0 = false; // file carries direction.0
 static std::vector<float> g_glp_data; // GLP vector data (loaded once)
 
 // load the model from a path (the file is fetched by JS and written to the FS)
@@ -44,6 +45,9 @@ bool glp_load_vector(const std::string & vec_path) {
     auto cvec = common_control_vector_load(infos, llama_model_n_layer(g_model));
     if (cvec.n_embd == -1) return false;
     g_glp_data = std::move(cvec.data);
+    // direction.0 rides as a trailing slot when the file carries it
+    g_glp_data.insert(g_glp_data.end(), cvec.data0.begin(), cvec.data0.end());
+    g_has_l0 = !cvec.data0.empty();
     g_n_embd = cvec.n_embd;
     return true;
 }
@@ -58,7 +62,7 @@ bool glp_set_alpha(float alpha) {
         g_n_embd,
         alpha <= 0.0f ? LLAMA_CVEC_APPLY_ADD : LLAMA_CVEC_APPLY_PROJECT,
         alpha,
-        1,
+        g_has_l0 ? 0 : 1, // arm layer 0 only when direction.0 is present
         llama_model_n_layer(g_model));
     return err == 0;
 }
