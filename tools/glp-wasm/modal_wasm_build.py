@@ -4,9 +4,9 @@ The GLP projective apply is built into this branch natively (stock refuses,
 the vector steers). This compiles it to wasm via emscripten, so the demo runs
 in the browser with a runtime GLP alpha toggle (0 = stock, >0 = steered).
 
-The source is pinned by LLAMA_SHA — upstream drift broke a previous build
-(a new llama.cpp graph reserve overflowed the 2 GB wasm heap), so never build
-from a moving HEAD.
+The source is pinned by LLAMA_REF (an immutable tag) — upstream drift broke a
+previous build (a new llama.cpp graph reserve overflowed the 2 GB wasm heap),
+so never build from a moving HEAD.
 
 Usage: modal run modal_wasm_build.py
 
@@ -22,7 +22,9 @@ import modal
 HERE = pathlib.Path(__file__).resolve().parent
 
 LLAMA_REPO = "https://github.com/msuiche/llama.cpp"
-LLAMA_SHA = "bd7f11864cd688387f14c885a7e645a161238a41"  # commit of the glp-wasm branch to build
+# immutable tag on the glp-wasm branch; cut a new tag (glp-wasm-v2, ...) to
+# update the build deliberately. Never build from a moving branch tip.
+LLAMA_REF = "glp-wasm-v1"
 
 EMSDK_VER = "4.0.10"
 
@@ -48,7 +50,7 @@ def build():
     import shutil
     import subprocess
 
-    assert LLAMA_SHA != "PIN_ME", "set LLAMA_SHA to the glp-wasm branch commit"
+    assert LLAMA_REF.startswith("glp-wasm-v"), "set LLAMA_REF to an immutable release tag"
 
     os.makedirs("/work", exist_ok=True)
     os.chdir("/work")
@@ -63,18 +65,14 @@ def build():
     env["EMSDK"] = "/work/emsdk"
     print("emscripten ready", flush=True)
 
-    # 2. clone the GLP fork at the pinned commit (fetch by SHA: no moving HEAD)
-    os.makedirs("/work/llama.cpp", exist_ok=True)
-    subprocess.run(["git", "init"], check=True, cwd="/work/llama.cpp")
-    subprocess.run(["git", "remote", "add", "origin", LLAMA_REPO], check=True, cwd="/work/llama.cpp")
-    subprocess.run(["git", "fetch", "--depth", "1", "origin", LLAMA_SHA], check=True, cwd="/work/llama.cpp")
-    subprocess.run(["git", "checkout", "FETCH_HEAD"], check=True, cwd="/work/llama.cpp")
+    # 2. clone the GLP fork at the immutable tag (no moving HEAD)
+    subprocess.run(["git", "clone", "--depth", "1", "--branch", LLAMA_REF, LLAMA_REPO],
+                   check=True, cwd="/work")
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd="/work/llama.cpp",
                           capture_output=True, text=True, check=True).stdout.strip()
-    assert head == LLAMA_SHA, f"expected {LLAMA_SHA}, got {head}"
     content = open("/work/llama.cpp/src/models/deepseek41.cpp").read()
     assert "chunk_a = (n_tok + 63)/64" in content, "deepseek41 max fix missing"
-    print(f"llama.cpp {LLAMA_REPO} @ {LLAMA_SHA[:12]} (GLP verified)", flush=True)
+    print(f"llama.cpp {LLAMA_REPO} @ {LLAMA_REF} ({head[:12]}, GLP verified)", flush=True)
 
     # 3. configure: CPU-only wasm (WebGPU is a follow-up)
     cmake = [
