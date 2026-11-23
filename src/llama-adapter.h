@@ -24,6 +24,8 @@ struct llama_adapter_cvec {
             const float * data,
             size_t len,
             int32_t n_embd,
+            llama_cvec_apply_mode mode,
+            float alpha,
             int32_t il_start,
             int32_t il_end);
 
@@ -32,6 +34,11 @@ private:
 
     int32_t layer_start = -1;
     int32_t layer_end   = -1;
+
+    llama_cvec_apply_mode mode = LLAMA_CVEC_APPLY_ADD;
+
+    // ablation strength, PROJECT mode only
+    float alpha = 1.0f;
 
     std::vector<ggml_context_ptr> ctxs;
     std::vector<ggml_backend_buffer_ptr> bufs;

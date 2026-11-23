@@ -750,6 +750,12 @@ extern "C" {
             size_t n_adapters,
             float * scales);
 
+    // control vector apply mode
+    enum llama_cvec_apply_mode {
+        LLAMA_CVEC_APPLY_ADD     = 0,
+        LLAMA_CVEC_APPLY_PROJECT = 1,
+    };
+
     // Apply a loaded control vector to a llama_context, or if data is NULL, clear
     // the currently loaded vector.
     // n_embd should be the size of a single layer's control, and data should point
@@ -761,6 +767,8 @@ extern "C" {
                      const float * data,
                           size_t   len,
                          int32_t   n_embd,
+        llama_cvec_apply_mode   mode,
+                          float   alpha,
                          int32_t   il_start,
                          int32_t   il_end);
 

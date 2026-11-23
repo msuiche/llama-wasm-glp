@@ -1474,6 +1474,8 @@ common_init_result_ptr common_init_from_params(common_params & params, bool mode
                 cvec.data.data(),
                 cvec.data.size(),
                 cvec.n_embd,
+                cvec.apply_mode,
+                cvec.alpha,
                 params.control_vector_layer_start,
                 params.control_vector_layer_end);
         if (err) {
@@ -2014,6 +2016,42 @@ static common_control_vector_data common_control_vector_load_one(const common_co
         return result;
     }
 
+    // GLP metadata gating: read glp.mode / glp.alpha_default / glp.hook_point.
+    // A GLP file declares its mechanism; a reader that can't honor it must
+    // refuse (an additive apply of a projective vector is silently wrong).
+    {
+        const int kid = gguf_find_key(ctx_gguf, "glp.mode");
+        if (kid >= 0) {
+            std::string mode = gguf_get_val_str(ctx_gguf, kid);
+            if (mode == "project") {
+                result.apply_mode = LLAMA_CVEC_APPLY_PROJECT;
+            } else if (mode == "add") {
+                result.apply_mode = LLAMA_CVEC_APPLY_ADD;
+            } else {
+                COM_ERR("%s: unsupported glp.mode '%s'; refusing to apply\n", load_info.fname.c_str(), mode.c_str());
+                gguf_free(ctx_gguf);
+                ggml_free(ctx);
+                return result;
+            }
+        }
+        const int hid = gguf_find_key(ctx_gguf, "glp.hook_point");
+        if (hid >= 0) {
+            std::string hp = gguf_get_val_str(ctx_gguf, hid);
+            if (hp != "residual_stream_post_layer") {
+                COM_ERR("%s: glp.hook_point '%s' is not where llama.cpp applies control vectors (residual_stream_post_layer); refusing\n", load_info.fname.c_str(), hp.c_str());
+                gguf_free(ctx_gguf);
+                ggml_free(ctx);
+                return result;
+            }
+        }
+        if (result.apply_mode == LLAMA_CVEC_APPLY_PROJECT) {
+            const int aid = gguf_find_key(ctx_gguf, "glp.alpha_default");
+            if (aid >= 0) {
+                result.alpha = gguf_get_val_f32(ctx_gguf, aid);
+            }
+        }
+    }
+
     int32_t n_tensors = gguf_get_n_tensors(ctx_gguf);
     if (n_tensors == 0) {
         COM_WRN("no direction tensors found in %s\n", load_info.fname.c_str());
@@ -2108,6 +2146,11 @@ common_control_vector_data common_control_vector_load(const std::vector<common_c
         if (result.n_embd == -1) {
             result = std::move(cur);
         } else {
+            if (cur.apply_mode != result.apply_mode) {
+                COM_ERR("control vector in %s has a different apply mode than previous files; cannot merge\n", info.fname.c_str());
+                result.n_embd = -1;
+                break;
+            }
             result.data.resize(std::max(result.data.size(), cur.data.size()), 0.0f);  // extend if necessary
             for (size_t i = 0; i < cur.data.size(); i++) {
                 result.data[i] += cur.data[i];

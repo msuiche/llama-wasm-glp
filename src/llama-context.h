@@ -147,6 +147,8 @@ struct llama_context {
             const float * data,
                  size_t   len,
                 int32_t   n_embd,
+  llama_cvec_apply_mode   mode,
+                  float   alpha,
                 int32_t   il_start,
                 int32_t   il_end);
 

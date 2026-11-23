@@ -1258,6 +1258,10 @@ float common_embd_similarity_cos(const float * embd1, const float * embd2, int n
 struct common_control_vector_data {
     int n_embd;
 
+    // GLP metadata (mode/alpha from glp.* keys; ADD + 1.0 defaults)
+    llama_cvec_apply_mode apply_mode = LLAMA_CVEC_APPLY_ADD;
+    float alpha = 1.0f;
+
     // stores data for layers [1, n_layer] where n_layer = data.size() / n_embd
     std::vector<float> data;
 };
