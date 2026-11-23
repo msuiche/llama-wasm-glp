@@ -24,7 +24,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 LLAMA_REPO = "https://github.com/msuiche/llama-wasm-glp"
 # immutable tag on the glp-wasm branch; cut a new tag (glp-wasm-v2, ...) to
 # update the build deliberately. Never build from a moving branch tip.
-LLAMA_REF = "glp-wasm-v1"
+LLAMA_REF = "glp-wasm-v2"
 
 EMSDK_VER = "4.0.10"
 DAWN_VER = "v20261119.211954"
