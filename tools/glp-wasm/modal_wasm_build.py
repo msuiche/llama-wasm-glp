@@ -1,20 +1,20 @@
 """Modal job: compile this GLP-patched llama.cpp to wasm for the browser demo.
 
-The GLP projective apply is built into this branch natively (stock refuses,
-the vector steers). This compiles it to wasm via emscripten, so the demo runs
-in the browser with a runtime GLP alpha toggle (0 = stock, >0 = steered).
+Builds TWO variants from the same pinned source:
+  - WebGPU (GGML_WEBGPU=ON, emdawnwebgpu port, ASYNCIFY): fast on GPU browsers
+  - CPU (simd128, single-threaded): fallback for everything else
+
+Outputs (Modal volume "llama-glp-wasm", dir llama-glp-wasm/):
+  glp-demo.js / glp-demo.wasm              CPU       -> site: glp-wasm-loader.js / glp-demo.wasm
+  glp-demo-webgpu.js / glp-demo-webgpu.wasm WebGPU   -> site: glp-webgpu-loader.js / glp-demo-webgpu.wasm
+  vector.gguf    the GLP steering vector (reused from the volume if present;
+                 otherwise uploaded from a local vector.gguf next to this file)
 
 The source is pinned by LLAMA_REF (an immutable tag) — upstream drift broke a
 previous build (a new llama.cpp graph reserve overflowed the 2 GB wasm heap),
 so never build from a moving HEAD.
 
 Usage: modal run modal_wasm_build.py
-
-Outputs (Modal volume "llama-glp-wasm", dir llama-glp-wasm/):
-  glp-demo.js    emscripten loader (deploy as glp-wasm-loader.js)
-  glp-demo.wasm  the module       (deploy as glp-demo.wasm)
-  vector.gguf    the GLP steering vector (reused from the volume if present;
-                 otherwise uploaded from a local vector.gguf next to this file)
 """
 import pathlib
 import modal
@@ -27,6 +27,8 @@ LLAMA_REPO = "https://github.com/msuiche/llama-wasm-glp"
 LLAMA_REF = "glp-wasm-v1"
 
 EMSDK_VER = "4.0.10"
+DAWN_VER = "v20261119.211954"
+DAWN_PKG = f"https://github.com/google/dawn/releases/download/{DAWN_VER}/emdawnwebgpu_pkg-{DAWN_VER}.zip"
 
 app = modal.App("llama-glp-wasm")
 vol = modal.Volume.from_name("llama-glp-wasm", create_if_missing=True)
@@ -65,8 +67,15 @@ def build():
     env["EMSDK"] = "/work/emsdk"
     print("emscripten ready", flush=True)
 
-    # 2. clone the GLP fork at the immutable tag (no moving HEAD)
-    subprocess.run(["git", "clone", "--depth", "1", "--branch", LLAMA_REF, LLAMA_REPO],
+    # 2. emdawnwebgpu package (pinned Dawn release) for the WebGPU variant
+    subprocess.run(["curl", "-sL", "-o", "dawn.zip", DAWN_PKG], check=True, cwd="/work")
+    subprocess.run(["unzip", "-q", "-o", "dawn.zip", "-d", "."], check=True, cwd="/work")
+    port = "/work/emdawnwebgpu_pkg/emdawnwebgpu.port.py"
+    assert os.path.exists(port), "emdawnwebgpu.port.py missing from the Dawn package"
+    print("emdawnwebgpu ready", flush=True)
+
+    # 3. clone the GLP fork at the immutable tag (no moving HEAD)
+    subprocess.run(["git", "clone", "--depth", "1", "--branch", LLAMA_REF, LLAMA_REPO, "llama.cpp"],
                    check=True, cwd="/work")
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd="/work/llama.cpp",
                           capture_output=True, text=True, check=True).stdout.strip()
@@ -74,65 +83,82 @@ def build():
     assert "chunk_a = (n_tok + 63)/64" in content, "deepseek41 max fix missing"
     print(f"llama.cpp {LLAMA_REPO} @ {LLAMA_REF} ({head[:12]}, GLP verified)", flush=True)
 
-    # 3. configure: CPU-only wasm (WebGPU is a follow-up)
-    cmake = [
-        "emcmake", "cmake", "-B", "build-wasm",
-        "-DGGML_WEBGPU=OFF",
-        "-DGGML_NATIVE=OFF",
-        "-DLLAMA_BUILD_COMMON=ON",
-        "-DLLAMA_BUILD_APP=OFF",
-        "-DLLAMA_BUILD_TESTS=OFF",
-        "-DLLAMA_BUILD_SERVER=OFF",
-        "-DLLAMA_CURL=OFF",
-        "-DLLAMA_UI_GZIP=OFF",
-        "-DLLAMA_WASM_MEM64=OFF",
-        "-DCMAKE_BUILD_TYPE=Release",
-    ]
-    r = subprocess.run(cmake, cwd="/work/llama.cpp", env=env, capture_output=True, text=True)
-    print("cmake stdout:", r.stdout[-2000:], flush=True)
-    print("cmake stderr:", r.stderr[-2000:], flush=True)
-    if r.returncode != 0:
-        raise subprocess.CalledProcessError(r.returncode, cmake)
+    # 4. build both variants
+    for variant, webgpu in [("cpu", False), ("webgpu", True)]:
+        suffix = "-webgpu" if webgpu else ""
+        bdir = f"build-wasm{suffix}"
+        cmake = [
+            "emcmake", "cmake", "-B", bdir,
+            f"-DGGML_WEBGPU={'ON' if webgpu else 'OFF'}",
+            "-DGGML_NATIVE=OFF",
+            "-DLLAMA_BUILD_COMMON=ON",
+            "-DLLAMA_BUILD_APP=OFF",
+            "-DLLAMA_BUILD_TESTS=OFF",
+            "-DLLAMA_BUILD_SERVER=OFF",
+            "-DLLAMA_CURL=OFF",
+            "-DLLAMA_UI_GZIP=OFF",
+            "-DLLAMA_WASM_MEM64=OFF",
+            "-DCMAKE_BUILD_TYPE=Release",
+        ]
+        if webgpu:
+            cmake.append("-DEMDAWNWEBGPU_DIR=/work/emdawnwebgpu_pkg")
+            # JSPI instead of ASYNCIFY: binaryen's Asyncify pass crashes
+            # (UNREACHABLE at Asyncify.cpp:1146) on this build. JSPI needs
+            # Chrome 137+; other browsers get the CPU fallback.
+            cmake.append("-DGGML_WEBGPU_JSPI=ON")
+        r = subprocess.run(cmake, cwd="/work/llama.cpp", env=env, capture_output=True, text=True)
+        print(f"[{variant}] cmake stdout:", r.stdout[-1500:], flush=True)
+        print(f"[{variant}] cmake stderr:", r.stderr[-4000:], flush=True)
+        if r.returncode != 0:
+            raise subprocess.CalledProcessError(r.returncode, cmake)
 
-    # 4. build the llama.cpp library (not a cli target — we link a custom main)
-    r = subprocess.run(["cmake", "--build", "build-wasm", "--config", "Release", "-j", "16"],
-                       cwd="/work/llama.cpp", env=env, capture_output=True, text=True)
-    print("build stdout:", r.stdout[-2000:], flush=True)
-    print("build stderr:", r.stderr[-2000:], flush=True)
-    if r.returncode != 0:
-        raise subprocess.CalledProcessError(r.returncode, ["cmake", "--build"])
+        r = subprocess.run(["cmake", "--build", bdir, "--config", "Release", "-j", "16"],
+                           cwd="/work/llama.cpp", env=env, capture_output=True, text=True)
+        print(f"[{variant}] build stdout:", r.stdout[-1500:], flush=True)
+        print(f"[{variant}] build stderr:", r.stderr[-4000:], flush=True)
+        if r.returncode != 0:
+            raise subprocess.CalledProcessError(r.returncode, ["cmake", "--build"])
 
-    # 5. compile the GLP demo main (from the repo) against the built libraries
-    libs = []
-    for pat in ["build-wasm/src/libllama.a", "build-wasm/common/libcommon.a",
-                "build-wasm/common/libllama-common.a",
-                "build-wasm/ggml/src/libggml*.a"]:
-        libs.extend(sorted(glob.glob(f"/work/llama.cpp/{pat}")))
-    emcc = ["/work/emsdk/upstream/emscripten/em++",
-            "-O3", "-std=c++17", "-msimd128",
-            "-I", "include", "-I", "ggml/include", "-I", "common",
-            "/work/llama.cpp/tools/glp-wasm/glp_wasm_main.cpp",
-            *libs,
-            "--bind",
-            "-s", "WASM_BIGINT=1",
-            "-s", "ALLOW_MEMORY_GROWTH=1",
-            "-s", "EXPORTED_RUNTIME_METHODS=['FS','callMain','ccall','cwrap']",
-            "-s", "FORCE_FILESYSTEM=1",
-            "-s", "MODULARIZE=1",
-            "-s", "EXPORT_NAME='createGlpDemo'",
-            "-o", "/work/glp-demo.js",
-           ]
-    print("+", " ".join(emcc[:20]), "...", flush=True)
-    r = subprocess.run(emcc, cwd="/work/llama.cpp", env=env, capture_output=True, text=True)
-    print("emcc stdout:", r.stdout[-2000:], flush=True)
-    print("emcc stderr:", r.stderr[-2000:], flush=True)
-    if r.returncode != 0:
-        raise subprocess.CalledProcessError(r.returncode, emcc[:2])
+        libs = []
+        for pat in [f"{bdir}/src/libllama.a", f"{bdir}/common/libcommon.a",
+                    f"{bdir}/common/libllama-common.a",
+                    f"{bdir}/ggml/src/libggml*.a",
+                    f"{bdir}/ggml/src/ggml-webgpu/libggml*.a"]:
+            libs.extend(sorted(glob.glob(f"/work/llama.cpp/{pat}")))
+        emcc = ["/work/emsdk/upstream/emscripten/em++",
+                "-O3", "-std=c++17", "-msimd128",
+                "-I", "include", "-I", "ggml/include", "-I", "common",
+                "/work/llama.cpp/tools/glp-wasm/glp_wasm_main.cpp",
+                *libs,
+                "--bind",
+                "-s", "WASM_BIGINT=1",
+                "-s", "ALLOW_MEMORY_GROWTH=1",
+                "-s", "EXPORTED_RUNTIME_METHODS=['FS','callMain','ccall','cwrap']",
+                "-s", "FORCE_FILESYSTEM=1",
+                "-s", "MODULARIZE=1",
+                "-s", "EXPORT_NAME='createGlpDemo'",
+                "-o", f"/work/glp-demo{suffix}.js",
+               ]
+        if webgpu:
+            # ggml-webgpu's INTERFACE link options don't propagate to a manual
+            # em++ link, so pass the port + JSPI explicitly. JSPI_EXPORTS lists
+            # every export that may suspend (emwgpuWaitAny during ctors / model
+            # load / decode), otherwise V8 throws SuspendError.
+            emcc += [f"--use-port={port}", "-s", "JSPI", "-fwasm-exceptions",
+                     "-DGLP_WEBGPU",
+                     "-s", "JSPI_EXPORTS=__wasm_call_ctors,_glp_load_model,_glp_load_vector,_glp_generate"]
+        print(f"[{variant}] +", " ".join(emcc[:20]), "...", flush=True)
+        r = subprocess.run(emcc, cwd="/work/llama.cpp", env=env, capture_output=True, text=True)
+        print(f"[{variant}] emcc stdout:", r.stdout[-1500:], flush=True)
+        print(f"[{variant}] emcc stderr:", r.stderr[-4000:], flush=True)
+        if r.returncode != 0:
+            raise subprocess.CalledProcessError(r.returncode, emcc[:2])
 
-    # 6. outputs to the volume (always deploy the .js and .wasm together)
+    # 5. outputs to the volume (always deploy each .js with its own .wasm)
     out_dir = "/data/llama-glp-wasm"
     os.makedirs(out_dir, exist_ok=True)
-    for f in ["/work/glp-demo.js", "/work/glp-demo.wasm"]:
+    for f in ["/work/glp-demo.js", "/work/glp-demo.wasm",
+              "/work/glp-demo-webgpu.js", "/work/glp-demo-webgpu.wasm"]:
         shutil.copy(f, out_dir + "/")
     if os.path.exists("/work/vector.gguf"):
         shutil.copy("/work/vector.gguf", out_dir + "/")

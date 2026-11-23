@@ -148,11 +148,22 @@ std::string glp_generate(const std::string & prompt, int max_new) {
     return out;
 }
 
+// WebGPU/JSPI builds: these entry points can suspend (emwgpuWaitAny during
+// model load and decode), so embind must wrap them with WebAssembly.promising
+// via emscripten::async() — synchronous wrappers throw SuspendError. The CPU
+// build stays synchronous (also keeps Bun's JSCore, which lacks
+// WebAssembly.promising, able to run the local test).
+#ifdef GLP_WEBGPU
+#define GLP_ASYNC emscripten::async()
+#else
+#define GLP_ASYNC
+#endif
+
 EMSCRIPTEN_BINDINGS(glp_demo) {
-    emscripten::function("loadModel", &glp_load_model);
-    emscripten::function("loadVector", &glp_load_vector);
+    emscripten::function("loadModel", &glp_load_model, GLP_ASYNC);
+    emscripten::function("loadVector", &glp_load_vector, GLP_ASYNC);
     emscripten::function("setAlpha", &glp_set_alpha);
-    emscripten::function("generate", &glp_generate);
+    emscripten::function("generate", &glp_generate, GLP_ASYNC);
     emscripten::function("onToken", &glp_on_token);
 }
 
